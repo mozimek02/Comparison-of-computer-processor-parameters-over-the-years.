@@ -1,0 +1,165 @@
+---
+title: "Porównanie parametrów procesorów komputerowych na przestrzeni lat."
+author: "Mikołaj Ozimek"
+date: "2023-02-06"
+output: html_document
+---
+```{r, echo=FALSE, warning=FALSE, message=FALSE}
+library(tidyverse)
+library(Hmisc)
+library(dplyr)
+library(corrplot)
+library(devtools)
+library(data.table)
+library(factoextra)
+library(ggbiplot)
+library(MASS)
+library(party)
+library(randomForest)
+library(cluster)
+library(data.table)
+```
+<font size = 3.7>Celem tego projektu jest analiza danych dotyczących procesorów komputerowych na przestrzeni lat 2007-2022. Dane te zawierają nazwę procesora, jego producentów, cenę, wartości benchmarków jak urządzenie poradziło sobie, maksymalna ilość wydzielanego ciepła w ciągu sekundy, ilość rdzeni, datę testu, socket oraz przeznaczenie.</font>
+
+```{r, echo=FALSE}
+fread('Parametry.csv')->Par1
+fread('Parametry2.csv')->Par2
+```
+
+```{r, echo=FALSE}
+tabelka<-dplyr::select(Par1,price,cpuMark,cpuValue,threadMark,threadValue,TDP)
+tabelka2<-na.omit(tabelka)
+tabelka3<-na.omit(Par1)
+Par2u<-na.omit(Par2)
+hist.data.frame(tabelka2)
+```
+
+<font size = 3.7>Tak jak widać na załączonych histogramach największą ilość stanowią tanie procesory o niskich wynikach w testach. Jest to spowodowane tym, iż producenci skupiają się głównie na urządzeniach przeznaczonych dla zwykłego użytkownika komputera domowego. Wartości odstającymi są w tym wypadku drogie procesory osiągające dużo wyższe wyniki lecz przeznaczone są one w szczególności dla zaawansowanych użytkowników stąd też małe prawdopodobieństwo, że losowo wybrana osoba akurat będzie właścicielem takiego urządzenia.</font> 
+
+
+```{r, echo=FALSE, figures-side, fig.show="hold", out.width="40%"}
+summary(tabelka2)
+c2<-tabelka2[,2]
+c3<-tabelka2[,3]
+c4<-tabelka2[,4]
+c5<-tabelka2[,5]
+c6<-tabelka2[,6]
+cechy<-c(c2,c3,c4,c5,c6)
+nazwy<-c('cpuMark','cpuValue','threadMark','threadValue','TDP')
+x<-1
+for(i in cechy){
+  qqplot(tabelka2$price,i,xlab='cena',ylab=nazwy[x])
+  x <- x + 1
+}
+```
+
+<font size = 3.7>Powyższe wykresy kwantyl-kwantyl zostały wykonane pomiędzy ceną a pozostałymi cechami. Wykresy te pokazują, że podobne rozkłady mają zmienna 'price' wraz z  'cpuMark' , 'cpuValue' oraz 'threadValue'. Wskazuje na to liniowość tych wykresów.</font>
+
+```{r, echo=FALSE}
+Korelacja<-cor(tabelka2)
+corrplot(Korelacja, method="circle")
+```
+
+<font size = 3.7>Na załączonym wykresie korelacji między zmiennymi widać w większości przypadków dodatnią korelację, na co wskazuje kolor niebieski.Wielkość koła pokazuje siłę korelacji, im jest ono większe tym korelacja jest większa.Dla przykładu widać ją dobrze pomiędzy ceną a benchmarkiem cpu(cpuMark) oznacza to, że wraz ze wzrostem ceny otrzymujemy lepsze urządzenie osiągające wyższe wyniki w testach. Tak samo cpuMark i threadMark.</font>
+
+<font size = 3.7>W tej części raportu wykonamy redukcję wymiaru z 4 na 2 zmienne na pliku Parametry1 oraz Parametry2. Wykoszystałem w tym celu algorym PCA. Zobaczymy uzyskane wykresy oraz wyciągniemy z nich określone wnioski.</font>
+
+```{r, echo=FALSE}
+procesory.pca<-prcomp(tabelka3[,2:5], center=TRUE, scale.=TRUE)
+ggbiplot(procesory.pca, obs.scale=1, var.scale=1, groups = tabelka3$category)+ggtitle("PCA według kategorii procesora")
+fviz_eig(procesory.pca, main = "% zmienności wyjaśnianej przez poszczególne główne składowe")
+```
+
+<font size = 3.7>Osie Ox oraz Oy prezentują dwie pierwsze składowe naszego testu. W zależności od położenia wektorów względem siebie możemy odczytać czy zmienne są ze sobą skorelowane czy nie.Nieduży kąt pomiędzy zmienną 'price' a 'cpuMark' wskazuje na dosyć silną korelację, wnioski te wysnuliśmy również z poprzedniego wykresu korelacji. Natomiast kąt między 'cpuMark' a 'cpuValue' jest niemal prosty co wskazuje na mniejszą korelację.</font>
+
+<font size = 3.7>Teraz wykonam PCA na danych Parametry2. Również zobaczymy określone zależności.</font>
+
+```{r, echo=FALSE}
+procesory2.pca<- prcomp(Par2[,3:6], center=TRUE, scale.=TRUE)
+ggbiplot(procesory2.pca, obs.scale=1, var.scale=1, groups = Par2$manufacturer)+ggtitle("Analiza głównych składowych dla zbioru danych Procesory")
+fviz_eig(procesory2.pca, main = "% zmienności wyjaśnianej przez poszczególne główne składowe")
+```
+
+<font size = 3.7>Tym razem grupowałem za pomocą nazw producentów procesorów. Dzięki temu wykres jest czytelniejszy niż w poprzednim przypadku gdzie grupowałem na podstawie przeznaczenia procesora. Widzimy silną zależność pomiędzy rdzeniami oraz wątkami co jest oczywiste ze względu na to, że zwiększenie jednej powoduje wzrost drugiej zmiennej. Niską korelację widzimy jednak pomiędzy rdzeniami/wątkami a wynikami pojedynczymi(singleScore). Tak samo jak w przypadku poprzednich danych 1 zmienna składowa wyjaśnia jak najwięcej zmienności, natomiast pozostałe coraz mniej.</font>
+
+<font size = 3.7>Wykonam w tej części dzielenie mojego zbioru danych na części. Dokonałem analizy skupień za pomocą metody k-średnich. Algorytm podzielił mi mój zbiór danych na pewne klastry które widoczne będą na wykresie.</font>
+
+```{r, echo=FALSE}
+Par3u<-dplyr::select(Par2u,singleScore,multiScore,cores,threads)
+Par3u<-scale(Par3u)
+klastry <- kmeans(Par3u,3)
+plot(Par3u, pch=klastry$cluster, col=klastry$cluster)
+points(klastry$centers, cex=1, pch=19)
+```
+
+<font size = 3.7>Podczas tworzenia wybrałem podział na 3 klastry. Zielone krzyżyki oraz czarne okręgi widocznie od siebie odstają, tak samo jak czerwone trójkąty oznaczające małoliczny klaster.Czarnymi kropkami oznaczyłem środki określonych klas.</font>
+
+<font size = 3.7>Zobaczmy jak to wygląda w postaci klastrowania hierarchicznego.</font>
+```{r, echo=FALSE}
+klaster <- agnes(Par3u, method="complete")
+plot(klaster)
+```
+
+<font size = 3.7>Wykresy pudełkowe pokazane poniżej przedstawiają najważniejsze miary statystyczne dla procesorów desktopowych, laptopowych oraz serverowych.</font>
+
+```{r, echo=FALSE}
+dyskr2<-filter(tabelka3,category==c('Desktop','Laptop','Server'))
+summary(dyskr2)
+boxplot(cpuMark~category,data=dyskr2,col='lavender')
+boxplot(threadMark~category,data=dyskr2,col='lavender')
+```
+
+<font size = 3.7>Tabelka nad wykresami przedstawia szczegółowe informacje na temat poszczególnych urządzeń</font>
+
+<font size = 3.7>Wyznaczam analizę dyskryminacji za pomocą metody LDA</font>
+
+```{r, echo=FALSE}
+tabelka4<-dplyr::filter(tabelka3,category==c('Desktop','Server'))
+tabelka5<-tabelka4[ , 'category' := as.factor(category)]
+dyskr = tabelka5[,c(3,5)]
+klasa = as.numeric(tabelka5$category)
+klasyfikatorLDA = MASS::lda(dyskr, klasa)
+plot(klasyfikatorLDA, panel = panel.lda, cex = 0.7, dimen = 1, col='limegreen')
+```
+
+<font size = 3.7>Wykresy te nakładają się na siebie, pokazuje to niewielką seprarację między danymi</font>
+
+<font size = 3.7>Tworzę drzewo decyzyjne na podstawie określonych cech('cpuMark' oraz 'threadMark')</font>
+
+```{r, echo=FALSE}
+zbior.uczacy = sample(1:nrow(tabelka5), nrow(tabelka5)/2, FALSE)
+ustawienia <- party::ctree_control(mincriterion = 0.5, testtype = "Teststatistic")
+drzewo <- party::ctree(category~cpuMark~threadMark,
+                       data=tabelka5, subset=zbior.uczacy, controls=ustawienia)
+plot(drzewo)
+```
+
+<font size = 3.7>Tak jak widać nasze drzewo ma dużą ilość gałęzi, co wskazuje na zmienność w naszych danych.Jest to spowodowane tym,że posiadamy urządzenia o zarówno bardzo niskich jak i bardzo wysokich parametrach</font> 
+
+<font size = 3.7>Tworzę las losowy.Będący kolejną metodą dyskryminacji</font>
+
+```{r, echo=FALSE}
+tabelka6<-tabelka4
+tabelka6[,4]<-log(tabelka6[,4])
+zbior.uczacy2 = sample(1:nrow(tabelka6), nrow(tabelka6)/2, FALSE)
+set.seed(1)
+klasyfikatorRF <- randomForest::randomForest(category~cpuValue+threadValue,
+                                             data=tabelka6,
+                                             subset=zbior.uczacy2, importance=TRUE, proximity=TRUE)
+oceny2 = predict(klasyfikatorRF, tabelka6[-zbior.uczacy2,])
+seqx = seq(0.13,130,2)
+seqy = seq(-1.5,5.8,0.07)
+siatka = as.data.frame(expand.grid(seqx, seqy))
+colnames(siatka) = c("threadValue", "cpuValue")
+kol  = c("grey90", "grey70")
+kol2  = c("red", "black")
+wub = predict(klasyfikatorRF, siatka)
+plot(siatka, col=kol[as.numeric(wub)], pch=15,
+     main="randomForest()",xlim=range(tabelka6[,"threadValue"]),ylim=range(tabelka6[,"cpuValue"]),
+     cex=1)
+points(tabelka6[,c("threadValue","cpuValue")],pch=c(1,4)[as.numeric(tabelka6$category)],
+       cex=1, col=kol2[as.numeric(tabelka6$category)], lwd=2)
+```
+
+<font size = 3.7>Tak jak widać dyskryminacja obserwacji na podstawie próby uczącej podzieliła mój zbiór na dwie części.Czarne krzyżyki skupione na szarych polach oraz czerwone okręgi na białych.Oznaczone pola są obszarami decyzyjnymi do których trafiły moje obserwacje.Wyznaczone klasyfikatory w tej metodzie wyznaczają ostateczną klasę dla danej obserwacji.</font>
+
